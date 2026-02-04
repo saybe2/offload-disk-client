@@ -1,4 +1,4 @@
-﻿{
+{
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -22,6 +22,9 @@
       "http": {
         "all": true
       },
+      "dialog": {
+        "open": true
+      },
       "shell": {
         "all": false
       }
@@ -29,6 +32,7 @@
     "updater": {
       "active": true,
       "dialog": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4NzEzQUY1OTRFQjAxRjEKUldUeEFldVU5VHB4ZUdPZVJWL1ErVksrY3NQMVJsSDRzNHRWakZwTzdGUk8xS0d3NWxMUU9nZTIK",
       "endpoints": [
         "https://github.com/saybe2/offload-disk-client/releases/latest/download/latest.json"
       ]

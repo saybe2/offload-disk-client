@@ -4,3 +4,4 @@
 /src-tauri/Cargo.lock
 /.env
 /.env.*
+/keys

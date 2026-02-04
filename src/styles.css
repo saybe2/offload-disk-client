@@ -203,6 +203,20 @@ button.primary {
   width: 260px;
 }
 
+.auth-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auth-row input {
+  background: #0b111b;
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
 .breadcrumb {
   display: flex;
   gap: 8px;
