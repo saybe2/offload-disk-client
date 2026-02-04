@@ -1,0 +1,283 @@
+﻿:root {
+  color-scheme: dark;
+  --bg: #0b0f16;
+  --panel: #141a24;
+  --panel-2: #101620;
+  --text: #e6edf7;
+  --muted: #8d9ab3;
+  --accent: #4aa3ff;
+  --accent-2: #7cc4ff;
+  --stroke: #1f2a3b;
+  --good: #4dd4a3;
+  --warning: #f5a524;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top left, #1b2332 0%, #0b0f16 45%, #0b0f16 100%);
+  color: var(--text);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 1.05fr 1.35fr;
+  gap: 24px;
+  padding: 24px;
+  height: 100vh;
+}
+
+.downloads-panel,
+.browser-panel {
+  background: var(--panel);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0 0 6px 0;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.chip-row {
+  display: flex;
+  gap: 8px;
+}
+
+.chip {
+  background: transparent;
+  border: 1px solid var(--stroke);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip.active {
+  background: var(--accent);
+  border-color: transparent;
+  color: #041627;
+}
+
+.download-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  background: var(--panel-2);
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+button.primary {
+  background: var(--accent);
+  color: #071628;
+  border-color: transparent;
+}
+
+.download-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.download-card {
+  background: #101620;
+  border: 1px solid var(--stroke);
+  padding: 14px 16px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.download-title {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent-2);
+}
+
+.status-dot[data-status="completed"] {
+  background: var(--good);
+}
+
+.status-dot[data-status="downloading"] {
+  background: var(--accent);
+}
+
+.file-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.file-meta {
+  margin: 4px 0 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.progress-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #1c2636;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #79c5ff);
+  border-radius: 999px;
+}
+
+.progress-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.browser-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.server-box {
+  display: flex;
+  gap: 8px;
+}
+
+.server-box input {
+  background: #0b111b;
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 10px;
+  width: 260px;
+}
+
+.breadcrumb {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.browser-table {
+  display: grid;
+  gap: 4px;
+}
+
+.table-head,
+.table-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.7fr 0.5fr;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+.table-head {
+  background: #0f1624;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.table-row {
+  background: #0f1520;
+  border: 1px solid transparent;
+}
+
+.table-row.folder {
+  background: #111a2a;
+}
+
+.table-row:hover {
+  border-color: var(--accent);
+}
+
+.row-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: #2a364a;
+}
+
+.icon.folder {
+  background: #ffb84d;
+}
+
+.icon.file {
+  background: #6bb3ff;
+}
+
+.drop-zone {
+  margin-top: auto;
+  border: 1px dashed var(--stroke);
+  border-radius: 14px;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
