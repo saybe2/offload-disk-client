@@ -26,10 +26,14 @@
         "all": true
       },
       "dialog": {
-        "open": true
+        "open": true,
+        "message": true
       },
       "shell": {
-        "all": false
+        "open": true
+      },
+      "notification": {
+        "all": true
       }
     },
     "updater": {

@@ -2,6 +2,8 @@
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/api/dialog";
+import { open as openExternal } from "@tauri-apps/api/shell";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/api/notification";
 import { downloadDir } from "@tauri-apps/api/path";
 
 const DEFAULT_SERVER = "http://95.78.126.135:3010";
@@ -64,6 +66,16 @@ function formatDuration(seconds: number) {
 }
 
 export default function App() {
+  const normalizeId = (value: any) => {
+    if (!value) return null;
+    if (typeof value === "string") return value;
+    if (typeof value === "object") {
+      if (value.$oid) return value.$oid;
+      if (value._id) return String(value._id);
+    }
+    return String(value);
+  };
+
   const [serverUrl, setServerUrl] = useState(localStorage.getItem("serverUrl") || DEFAULT_SERVER);
   const [username, setUsername] = useState(localStorage.getItem("username") || "");
   const [password, setPassword] = useState(localStorage.getItem("password") || "");
@@ -85,6 +97,7 @@ export default function App() {
   const [downloads, setDownloads] = useState<Record<string, DownloadItem>>({});
   const [filter, setFilter] = useState("all");
   const [logs, setLogs] = useState<LogItem[]>([]);
+  const [notified, setNotified] = useState<Record<string, boolean>>({});
 
   const addLog = (level: LogItem["level"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -118,6 +131,32 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const completed = Object.values(downloads).filter((d) => d.status === "completed");
+    if (completed.length === 0) return;
+    completed.forEach((item) => {
+      if (notified[item.id]) return;
+      setNotified((prev) => ({ ...prev, [item.id]: true }));
+      const notify = async () => {
+        try {
+          let granted = await isPermissionGranted();
+          if (!granted) {
+            const result = await requestPermission();
+            granted = result === "granted";
+          }
+          if (granted) {
+            sendNotification({
+              title: "Offload Disk Client",
+              body: `Загрузка завершена: ${item.name}`
+            });
+          }
+        } catch (err) {
+          addLog("warn", `Notification failed: ${String(err)}`);
+        }
+      };
+      notify();
+    });
+  }, [downloads, notified]);
 
   useEffect(() => {
     const onError = (event: ErrorEvent) => {
@@ -169,16 +208,6 @@ export default function App() {
     }
     return ["Files", ...chain];
   }, [currentFolderId, folderMap]);
-
-  const normalizeId = (value: any) => {
-    if (!value) return null;
-    if (typeof value === "string") return value;
-    if (typeof value === "object") {
-      if (value.$oid) return value.$oid;
-      if (value._id) return String(value._id);
-    }
-    return String(value);
-  };
 
   const currentFolders = useMemo(() => {
     return folders.filter((f) => (normalizeId(f.parentId) || null) === currentFolderId);
@@ -270,11 +299,25 @@ export default function App() {
 
   const loadRemote = async (folderId: string | null) => {
     try {
-      addLog("info", "Loading folders and files");
+      addLog("info", `Loading folders and files (${folderId || "root"})`);
       const foldersResp = await invoke<unknown>("list_folders");
-      const archivesResp = await invoke<unknown>("list_archives", { folder_id: folderId });
-      const folderData = (foldersResp as any).folders || [];
-      const archiveData = (archivesResp as any).archives || [];
+      const archivesResp = await invoke<unknown>("list_archives");
+      const folderDataRaw = Array.isArray((foldersResp as any).folders)
+        ? (foldersResp as any).folders
+        : (Array.isArray(foldersResp) ? foldersResp : []);
+      const archiveDataRaw = Array.isArray((archivesResp as any).archives)
+        ? (archivesResp as any).archives
+        : (Array.isArray(archivesResp) ? archivesResp : []);
+      const folderData = folderDataRaw.map((f: any) => ({
+        ...f,
+        _id: normalizeId(f._id),
+        parentId: normalizeId(f.parentId)
+      }));
+      const archiveData = archiveDataRaw.map((a: any) => ({
+        ...a,
+        _id: normalizeId(a._id),
+        folderId: normalizeId(a.folderId)
+      }));
       setFolders(folderData);
       setArchives(archiveData);
       setLoadError("");
@@ -304,7 +347,7 @@ export default function App() {
       addLog("info", `Download queued: ${name}`);
       const id = await invoke<string>("start_archive_download", {
         archiveId,
-        download_dir: downloadPath,
+        downloadDir: downloadPath,
         file_index: fileIndex
       });
       setDownloads((prev) => ({
@@ -380,9 +423,23 @@ export default function App() {
   }
 
 
-  return (
-    <div className="app-shell">
-      <aside className="downloads-panel">
+    return (
+      <div className="app-shell">
+      <aside
+        className="downloads-panel"
+        onDragOverCapture={(e) => e.preventDefault()}
+        onDropCapture={(e) => {
+          e.preventDefault();
+          const payload = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed?.archiveId) {
+              const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
+              enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
+            }
+          } catch {}
+        }}
+      >
         <div className="panel-header">
           <div>
             <p className="eyebrow">Downloads</p>
@@ -422,7 +479,15 @@ export default function App() {
             const pct = item.total ? Math.min(100, Math.floor((item.downloaded / item.total) * 100)) : 0;
             const eta = item.total && item.speed ? formatDuration((item.total - item.downloaded) / item.speed) : "";
             return (
-              <div key={item.id} className="download-card">
+              <div
+                key={item.id}
+                className="download-card"
+                onDoubleClick={() => {
+                  if (item.status !== "completed") return;
+                  const path = downloadPath ? `${downloadPath.replace(/[\\/]+$/, "")}\\${item.name}` : item.name;
+                  openExternal(path).catch((err) => addLog("error", `Open failed: ${String(err)}`));
+                }}
+              >
                 <div className="download-title">
                   <span className="status-dot" data-status={item.status.toLowerCase()} />
                   <div>
@@ -483,7 +548,7 @@ export default function App() {
             </div>
           )}
           {currentFolders.map((folder) => (
-            <div key={folder._id} className="table-row folder" onClick={() => { setCurrentFolderId(folder._id); loadRemote(folder._id); }}>
+            <div key={folder._id} className="table-row folder" onClick={() => { const nextId = normalizeId(folder._id); setCurrentFolderId(nextId); loadRemote(nextId); }}>
               <span className="row-name"><span className="icon folder" />{folder.name}</span>
               <span>Folder</span>
               <span />
@@ -496,7 +561,10 @@ export default function App() {
               style={file.bundleId ? { ["--bundle-hue" as any]: bundleHue(file.bundleId) } : undefined}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.setData("text/plain", JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex }));
+                const payload = JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex });
+                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("application/json", payload);
+                e.dataTransfer.setData("text/plain", payload);
               }}
               onDoubleClick={() => enqueueDownload(file.archiveId, file.name, file.fileIndex)}
             >

@@ -1,9 +1,9 @@
 ﻿use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as base64_engine;
@@ -20,6 +20,8 @@ use ghash::{GHash, Block as GHashBlock, Key as GHashKey, universal_hash::Univers
 use aes::cipher::{KeyInit, KeyIvInit, BlockEncrypt, StreamCipher};
 
 const DIRECT_RETRY_INTERVAL: Duration = Duration::from_secs(300);
+static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+static LOG_PATH_REPORTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Serialize)]
 struct DownloadProgress {
@@ -202,7 +204,7 @@ async fn list_archives(state: State<'_, ApiState>, folder_id: Option<String>) ->
   let query = if let Some(folder) = folder_id.filter(|value| !value.is_empty() && value != "null") {
     format!("/api/archives?folderId={}", folder)
   } else {
-    "/api/archives?root=1".to_string()
+    "/api/archives".to_string()
   };
   let res = api_get(&state, &query).await?;
   let json = res.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
@@ -611,32 +613,25 @@ fn log_event(app: &AppHandle, level: &str, message: &str) {
   } else {
     println!("[{}] {}", level, message);
   }
-  let mut wrote = false;
-  if let Some(dir) = tauri::api::path::app_log_dir(&app.config()) {
-    let _ = std::fs::create_dir_all(&dir);
-    let log_path = dir.join("offload-client.log");
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-      let _ = writeln!(file, "[{}] {}", level, message);
-      wrote = true;
+  let log_path = LOG_PATH.get_or_init(|| {
+    if let Some(dir) = tauri::api::path::app_log_dir(&app.config()) {
+      let _ = std::fs::create_dir_all(&dir);
+      return dir.join("offload-client.log");
     }
-  }
-  if !wrote {
     if let Some(dir) = tauri::api::path::app_data_dir(&app.config()) {
       let _ = std::fs::create_dir_all(&dir);
-      let log_path = dir.join("offload-client.log");
-      if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-        let _ = writeln!(file, "[{}] {}", level, message);
-        wrote = true;
-      }
+      return dir.join("offload-client.log");
     }
-  }
-  if !wrote {
     let dir = std::env::temp_dir().join("offload-disk-client");
     let _ = std::fs::create_dir_all(&dir);
-    let log_path = dir.join("offload-client.log");
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-      let _ = writeln!(file, "[{}] {}", level, message);
-    }
+    dir.join("offload-client.log")
+  });
+
+  if LOG_PATH_REPORTED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+    println!("[info] log file {}", log_path.display());
+  }
+  if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+    let _ = writeln!(file, "[{}] {}", level, message);
   }
 }
 
