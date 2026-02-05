@@ -285,11 +285,13 @@ export default function App() {
       if (parsed?.archiveId) {
         const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
         enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
+        dragPayloadRef.current = null;
         return;
       }
       if (parsed?.folderId) {
         const folderName = parsed.folderName || "folder";
         startFolderDownloadNow(parsed.folderId, folderName);
+        dragPayloadRef.current = null;
       }
     } catch {}
   };
@@ -395,9 +397,13 @@ export default function App() {
     };
     window.addEventListener("dragover", onDragOver, true);
     window.addEventListener("drop", onDrop, true);
+    document.addEventListener("dragover", onDragOver, true);
+    document.addEventListener("drop", onDrop, true);
     return () => {
       window.removeEventListener("dragover", onDragOver, true);
       window.removeEventListener("drop", onDrop, true);
+      document.removeEventListener("dragover", onDragOver, true);
+      document.removeEventListener("drop", onDrop, true);
     };
   }, [handleDropPayload]);
 
@@ -608,17 +614,22 @@ export default function App() {
       <aside
         className="downloads-panel"
         ref={downloadsRef}
-        onDragOverCapture={(e) => e.preventDefault()}
+        onDragOverCapture={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = "copy";
+          }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = "copy";
+          }
+        }}
         onDropCapture={(e) => {
           e.preventDefault();
           const payload = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
-          try {
-            const parsed = JSON.parse(payload);
-            if (parsed?.archiveId) {
-              const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
-              enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
-            }
-          } catch {}
+          handleDropPayload(payload);
         }}
       >
         <div className="panel-header">
@@ -626,6 +637,15 @@ export default function App() {
             <p className="eyebrow">Downloads</p>
             <h1>Offload Client</h1>
           </div>
+        </div>
+
+        <div className="filter-row download-filter">
+          <label>Фильтр загрузок</label>
+          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+          </select>
         </div>
 
         <div className="download-actions">
@@ -802,8 +822,8 @@ export default function App() {
       </main>
 
       {deleteDialogOpen && (
-        <div className="modal">
-          <div className="modal-card">
+        <div className="modal" onClick={() => setDeleteDialogOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Delete selected downloads ({selectedDownloads.length})</h3>
             </div>
