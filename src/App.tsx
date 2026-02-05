@@ -170,12 +170,22 @@ export default function App() {
     return ["Files", ...chain];
   }, [currentFolderId, folderMap]);
 
+  const normalizeId = (value: any) => {
+    if (!value) return null;
+    if (typeof value === "string") return value;
+    if (typeof value === "object") {
+      if (value.$oid) return value.$oid;
+      if (value._id) return String(value._id);
+    }
+    return String(value);
+  };
+
   const currentFolders = useMemo(() => {
-    return folders.filter((f) => (f.parentId || null) === currentFolderId);
+    return folders.filter((f) => (normalizeId(f.parentId) || null) === currentFolderId);
   }, [folders, currentFolderId]);
 
   const currentArchives = useMemo(() => {
-    return archives.filter((a) => (a.folderId || null) === currentFolderId);
+    return archives.filter((a) => (normalizeId(a.folderId) || null) === currentFolderId);
   }, [archives, currentFolderId]);
 
   const bundleHue = (bundleId: string) => {
