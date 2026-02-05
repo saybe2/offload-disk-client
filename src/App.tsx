@@ -115,6 +115,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      addLog("error", `UI error: ${event.message}`);
+    };
+    const onRejection = (event: PromiseRejectionEvent) => {
+      addLog("error", `Unhandled rejection: ${String(event.reason)}`);
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+
+  useEffect(() => {
     downloadDir().then((dir) => {
       if (!downloadPath) {
         setDownloadPath(dir || "");
