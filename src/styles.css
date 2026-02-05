@@ -203,6 +203,41 @@ button.primary {
   background: #142034;
 }
 
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #0f1520;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu .menu-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.context-menu .menu-item:hover {
+  background: #182234;
+}
+
+.context-menu .menu-item:disabled {
+  color: var(--muted);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.context-menu .menu-item.danger {
+  color: #ff9a9a;
+}
+
 .download-title {
   display: flex;
   gap: 12px;

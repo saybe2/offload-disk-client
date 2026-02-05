@@ -104,7 +104,7 @@ export default function App() {
       return {};
     }
   });
-  const [filter] = useState("all");
+  const [filter, setFilter] = useState("all");
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [notified, setNotified] = useState<Record<string, boolean>>({});
   const downloadsRef = useRef<HTMLDivElement | null>(null);
@@ -115,6 +115,7 @@ export default function App() {
   const [deleteRemember, setDeleteRemember] = useState(localStorage.getItem("downloadDeleteRemember") === "1");
   const [manualDragPayload, setManualDragPayload] = useState<string | null>(null);
   const [manualDragOver, setManualDragOver] = useState(false);
+  const [downloadMenu, setDownloadMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
   const addLog = (level: LogItem["level"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -431,6 +432,7 @@ export default function App() {
     };
     const onUp = () => {
       if (manualDragOver) {
+        addLog("info", "Manual drop on downloads");
         handleDropPayload(manualDragPayload);
       }
       setManualDragPayload(null);
@@ -444,6 +446,20 @@ export default function App() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [manualDragPayload, manualDragOver, handleDropPayload]);
+
+  useEffect(() => {
+    if (!downloadMenu) return;
+    const close = () => setDownloadMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [downloadMenu]);
 
   const connect = async (silent = false) => {
     if (!serverUrl || !username || !password) return;
@@ -732,6 +748,13 @@ export default function App() {
                   if (e.detail > 1) return;
                   toggleDownloadSelection(item.id);
                 }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  if (!selectedDownloads.includes(item.id)) {
+                    setSelectedDownloads([item.id]);
+                  }
+                  setDownloadMenu({ x: e.clientX, y: e.clientY, id: item.id });
+                }}
                 onDoubleClick={() => {
                   if (item.status !== "completed") return;
                   const path = downloadPath ? `${downloadPath.replace(/[\\/]+$/, "")}\\${item.name}` : item.name;
@@ -815,12 +838,24 @@ export default function App() {
             <div
               key={folder._id}
               className="table-row folder"
+              draggable
+              onDragStart={(e) => {
+                const payload = JSON.stringify({ folderId: folder._id, folderName: folder.name });
+                e.dataTransfer.setData("application/json", payload);
+                e.dataTransfer.setData("text/plain", payload);
+                e.dataTransfer.effectAllowed = "copy";
+                dragPayloadRef.current = payload;
+                addLog("info", `Drag start folder ${folder.name}`);
+              }}
               onMouseDown={(e) => {
                 if (e.button !== 0) return;
                 const payload = JSON.stringify({ folderId: folder._id, folderName: folder.name });
                 dragPayloadRef.current = payload;
                 setManualDragPayload(payload);
                 addLog("info", `Drag start folder ${folder.name}`);
+              }}
+              onDragEnd={() => {
+                dragPayloadRef.current = null;
               }}
               onClick={() => { const nextId = normalizeId(folder._id); setCurrentFolderId(nextId); loadRemote(nextId); }}
             >
@@ -834,12 +869,24 @@ export default function App() {
               key={file.key}
               className={`table-row file ${file.bundleId ? "bundle" : ""}`}
               style={file.bundleId ? { ["--bundle-hue" as any]: bundleHue(file.bundleId) } : undefined}
+              draggable
+              onDragStart={(e) => {
+                const payload = JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex });
+                e.dataTransfer.setData("application/json", payload);
+                e.dataTransfer.setData("text/plain", payload);
+                e.dataTransfer.effectAllowed = "copy";
+                dragPayloadRef.current = payload;
+                addLog("info", `Drag start file ${file.name}`);
+              }}
               onMouseDown={(e) => {
                 if (e.button !== 0) return;
                 const payload = JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex });
                 dragPayloadRef.current = payload;
                 setManualDragPayload(payload);
                 addLog("info", `Drag start file ${file.name}`);
+              }}
+              onDragEnd={() => {
+                dragPayloadRef.current = null;
               }}
               onDoubleClick={() => enqueueDownload(file.archiveId, file.name, file.fileIndex)}
             >
@@ -918,6 +965,53 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {downloadMenu && (() => {
+        const width = 220;
+        const height = 160;
+        const x = Math.min(downloadMenu.x, window.innerWidth - width - 8);
+        const y = Math.min(downloadMenu.y, window.innerHeight - height - 8);
+        const item = downloads[downloadMenu.id];
+        const canOpen = item?.status === "completed";
+        return (
+          <div
+            className="context-menu"
+            style={{ left: x, top: y, width }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="menu-item"
+              disabled={!canOpen}
+              onClick={() => {
+                if (!item) return;
+                const path = getDownloadPath(item);
+                invoke("open_path", { path }).catch((err) => addLog("error", `Open failed: ${String(err)}`));
+                setDownloadMenu(null);
+              }}
+            >
+              Open
+            </button>
+            <button
+              className="menu-item danger"
+              onClick={() => {
+                setDownloadMenu(null);
+                requestDeleteSelection();
+              }}
+            >
+              Delete files
+            </button>
+            <button
+              className="menu-item"
+              onClick={() => {
+                setDownloadMenu(null);
+                applyDeleteSelection("remove");
+              }}
+            >
+              Remove from list
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
