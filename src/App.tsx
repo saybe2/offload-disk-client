@@ -1,8 +1,7 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/api/dialog";
-import { open as openExternal } from "@tauri-apps/api/shell";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/api/notification";
 import { downloadDir } from "@tauri-apps/api/path";
 
@@ -98,6 +97,7 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [notified, setNotified] = useState<Record<string, boolean>>({});
+  const downloadsRef = useRef<HTMLDivElement | null>(null);
 
   const addLog = (level: LogItem["level"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -185,6 +185,39 @@ export default function App() {
       });
   }, [downloadPath]);
 
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      const target = downloadsRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const x = event.clientX;
+      const y = event.clientY;
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "copy";
+        }
+      }
+    };
+    const onDrop = (event: DragEvent) => {
+      const target = downloadsRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const x = event.clientX;
+      const y = event.clientY;
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+      event.preventDefault();
+      const payload = event.dataTransfer?.getData("application/json") || event.dataTransfer?.getData("text/plain") || null;
+      handleDropPayload(payload);
+    };
+    window.addEventListener("dragover", onDragOver, true);
+    window.addEventListener("drop", onDrop, true);
+    return () => {
+      window.removeEventListener("dragover", onDragOver, true);
+      window.removeEventListener("drop", onDrop, true);
+    };
+  }, [handleDropPayload]);
+
   const filteredDownloads = useMemo(() => {
     const list = Object.values(downloads);
     if (filter === "active") return list.filter((d) => d.status !== "completed");
@@ -255,6 +288,17 @@ export default function App() {
     });
     return entries;
   }, [currentArchives]);
+
+  const handleDropPayload = (payload: string | null) => {
+    if (!payload) return;
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed?.archiveId) {
+        const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
+        enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
+      }
+    } catch {}
+  };
 
   const connect = async (silent = false) => {
     if (!serverUrl || !username || !password) return;
@@ -427,6 +471,7 @@ export default function App() {
       <div className="app-shell">
       <aside
         className="downloads-panel"
+        ref={downloadsRef}
         onDragOverCapture={(e) => e.preventDefault()}
         onDropCapture={(e) => {
           e.preventDefault();
@@ -474,7 +519,15 @@ export default function App() {
           </div>
         </div>
 
-        <div className="download-list">
+        <div
+          className="download-list"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const payload = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+            handleDropPayload(payload);
+          }}
+        >
           {filteredDownloads.map((item) => {
             const pct = item.total ? Math.min(100, Math.floor((item.downloaded / item.total) * 100)) : 0;
             const eta = item.total && item.speed ? formatDuration((item.total - item.downloaded) / item.speed) : "";
@@ -485,7 +538,7 @@ export default function App() {
                 onDoubleClick={() => {
                   if (item.status !== "completed") return;
                   const path = downloadPath ? `${downloadPath.replace(/[\\/]+$/, "")}\\${item.name}` : item.name;
-                  openExternal(path).catch((err) => addLog("error", `Open failed: ${String(err)}`));
+                  invoke("open_path", { path }).catch((err) => addLog("error", `Open failed: ${String(err)}`));
                 }}
               >
                 <div className="download-title">
@@ -579,15 +632,8 @@ export default function App() {
           className="drop-zone"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
-            const payload = e.dataTransfer.getData("text/plain");
-            try {
-              const parsed = JSON.parse(payload);
-              if (parsed?.archiveId) {
-                const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
-                enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
-                return;
-              }
-            } catch {}
+            const payload = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+            handleDropPayload(payload);
           }}
         >
           <div>

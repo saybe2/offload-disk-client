@@ -640,6 +640,11 @@ fn client_log(app: AppHandle, level: String, message: String) {
   log_event(&app, &level, &message);
 }
 
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+  open::that(path).map_err(|e| e.to_string())
+}
+
 fn main() {
   tauri::Builder::default()
     .manage(DownloadManager::new())
@@ -651,7 +656,8 @@ fn main() {
       start_archive_download,
       pause_download,
       list_downloads,
-      client_log
+      client_log,
+      open_path
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
