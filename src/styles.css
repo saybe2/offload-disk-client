@@ -154,6 +154,26 @@ h2 {
   flex-wrap: wrap;
 }
 
+.concurrency {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: #0b111b;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.concurrency input {
+  width: 56px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: center;
+}
+
 button {
   background: var(--panel-2);
   border: 1px solid var(--stroke);

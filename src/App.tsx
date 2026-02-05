@@ -61,6 +61,12 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [autoLoginTried, setAutoLoginTried] = useState(false);
+  const [maxConcurrent, setMaxConcurrent] = useState(() => {
+    const raw = localStorage.getItem("maxConcurrent");
+    const parsed = raw ? Number(raw) : 2;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+  });
+  const [queue, setQueue] = useState<{ archiveId: string; name: string; fileIndex?: number }[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -138,7 +144,12 @@ export default function App() {
     } catch (err) {
       console.error(err);
       if (!silent) {
-        setLoginError("Login failed");
+        const message = String(err);
+        if (message.includes("master_key_unavailable")) {
+          setLoginError("Server did not allow master key export. Enable MASTER_KEY_EXPORT=true.");
+        } else {
+          setLoginError("Login failed");
+        }
       }
     } finally {
       setConnecting(false);
@@ -170,7 +181,7 @@ export default function App() {
     }
   };
 
-  const startDownload = async (archiveId: string, name: string, fileIndex?: number) => {
+  const startDownloadNow = async (archiveId: string, name: string, fileIndex?: number) => {
     if (!downloadPath) {
       alert("Set download folder first");
       return;
@@ -197,6 +208,28 @@ export default function App() {
       alert("Download start failed");
     }
   };
+
+  const enqueueDownload = (archiveId: string, name: string, fileIndex?: number) => {
+    const active = Object.values(downloads).filter((d) => !["completed", "error", "paused"].includes(d.status)).length;
+    if (active >= maxConcurrent) {
+      setQueue((prev) => [...prev, { archiveId, name, fileIndex }]);
+    } else {
+      startDownloadNow(archiveId, name, fileIndex);
+    }
+  };
+
+  useEffect(() => {
+    const active = Object.values(downloads).filter((d) => !["completed", "error", "paused"].includes(d.status)).length;
+    if (queue.length === 0) return;
+    if (active >= maxConcurrent) return;
+    const next = queue[0];
+    setQueue((prev) => prev.slice(1));
+    startDownloadNow(next.archiveId, next.name, next.fileIndex);
+  }, [downloads, queue, maxConcurrent]);
+
+  useEffect(() => {
+    localStorage.setItem("maxConcurrent", String(maxConcurrent));
+  }, [maxConcurrent]);
 
   const pauseDownload = async (id: string) => {
     await invoke("pause_download", { id });
@@ -293,6 +326,16 @@ export default function App() {
           <button className="primary" disabled={!connected} onClick={() => loadRemote(currentFolderId)}>Refresh</button>
           <button onClick={() => Object.values(downloads).forEach((d) => pauseDownload(d.id))}>Pause All</button>
           <button onClick={pickDownloadDir}>Set folder</button>
+          <div className="concurrency">
+            <span>Parallel</span>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={maxConcurrent}
+              onChange={(e) => setMaxConcurrent(Math.max(1, Number(e.target.value) || 1))}
+            />
+          </div>
         </div>
 
         <div className="download-list">
@@ -371,7 +414,7 @@ export default function App() {
               onDragStart={(e) => {
                 e.dataTransfer.setData("text/plain", JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex }));
               }}
-              onDoubleClick={() => startDownload(file.archiveId, file.name, file.fileIndex)}
+              onDoubleClick={() => enqueueDownload(file.archiveId, file.name, file.fileIndex)}
             >
               <span className="row-name"><span className="icon file" />{file.name}</span>
               <span>{file.status}</span>
@@ -389,7 +432,7 @@ export default function App() {
               const parsed = JSON.parse(payload);
               if (parsed?.archiveId) {
                 const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
-                startDownload(parsed.archiveId, name, parsed.fileIndex);
+                enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
                 return;
               }
             } catch {}
