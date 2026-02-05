@@ -199,7 +199,7 @@ async fn list_folders(state: State<'_, ApiState>) -> Result<serde_json::Value, S
 
 #[tauri::command]
 async fn list_archives(state: State<'_, ApiState>, folder_id: Option<String>) -> Result<serde_json::Value, String> {
-  let query = if let Some(folder) = folder_id {
+  let query = if let Some(folder) = folder_id.filter(|value| !value.is_empty() && value != "null") {
     format!("/api/archives?folderId={}", folder)
   } else {
     "/api/archives?root=1".to_string()

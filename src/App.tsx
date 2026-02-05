@@ -135,11 +135,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    downloadDir().then((dir) => {
-      if (!downloadPath) {
-        setDownloadPath(dir || "");
-      }
-    });
+    downloadDir()
+      .then((dir) => {
+        if (!downloadPath) {
+          setDownloadPath(dir || "");
+        }
+      })
+      .catch((err) => {
+        addLog("warn", `downloadDir failed: ${String(err)}`);
+      });
   }, [downloadPath]);
 
   const filteredDownloads = useMemo(() => {
