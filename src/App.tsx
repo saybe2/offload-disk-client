@@ -185,39 +185,6 @@ export default function App() {
       });
   }, [downloadPath]);
 
-  useEffect(() => {
-    const onDragOver = (event: DragEvent) => {
-      const target = downloadsRef.current;
-      if (!target) return;
-      const rect = target.getBoundingClientRect();
-      const x = event.clientX;
-      const y = event.clientY;
-      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-        event.preventDefault();
-        if (event.dataTransfer) {
-          event.dataTransfer.dropEffect = "copy";
-        }
-      }
-    };
-    const onDrop = (event: DragEvent) => {
-      const target = downloadsRef.current;
-      if (!target) return;
-      const rect = target.getBoundingClientRect();
-      const x = event.clientX;
-      const y = event.clientY;
-      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
-      event.preventDefault();
-      const payload = event.dataTransfer?.getData("application/json") || event.dataTransfer?.getData("text/plain") || null;
-      handleDropPayload(payload);
-    };
-    window.addEventListener("dragover", onDragOver, true);
-    window.addEventListener("drop", onDrop, true);
-    return () => {
-      window.removeEventListener("dragover", onDragOver, true);
-      window.removeEventListener("drop", onDrop, true);
-    };
-  }, [handleDropPayload]);
-
   const filteredDownloads = useMemo(() => {
     const list = Object.values(downloads);
     if (filter === "active") return list.filter((d) => d.status !== "completed");
@@ -299,6 +266,39 @@ export default function App() {
       }
     } catch {}
   };
+
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      const target = downloadsRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const x = event.clientX;
+      const y = event.clientY;
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "copy";
+        }
+      }
+    };
+    const onDrop = (event: DragEvent) => {
+      const target = downloadsRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const x = event.clientX;
+      const y = event.clientY;
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+      event.preventDefault();
+      const payload = event.dataTransfer?.getData("application/json") || event.dataTransfer?.getData("text/plain") || null;
+      handleDropPayload(payload);
+    };
+    window.addEventListener("dragover", onDragOver, true);
+    window.addEventListener("drop", onDrop, true);
+    return () => {
+      window.removeEventListener("dragover", onDragOver, true);
+      window.removeEventListener("drop", onDrop, true);
+    };
+  }, [handleDropPayload]);
 
   const connect = async (silent = false) => {
     if (!serverUrl || !username || !password) return;
