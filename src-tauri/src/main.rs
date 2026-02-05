@@ -767,6 +767,16 @@ fn open_path(path: String) -> Result<(), String> {
   open::that(path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn delete_path(path: String) -> Result<(), String> {
+  let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+  if meta.is_dir() {
+    std::fs::remove_dir_all(&path).map_err(|e| e.to_string())
+  } else {
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
+  }
+}
+
 fn main() {
   tauri::Builder::default()
     .manage(DownloadManager::new())
@@ -780,7 +790,8 @@ fn main() {
       pause_download,
       list_downloads,
       client_log,
-      open_path
+      open_path,
+      delete_path
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

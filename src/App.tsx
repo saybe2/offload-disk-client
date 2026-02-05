@@ -28,6 +28,7 @@ type DownloadItem = {
   total?: number;
   speed: number;
   status: string;
+  path?: string;
 };
 
 type LogItem = {
@@ -93,13 +94,25 @@ export default function App() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-  const [downloads, setDownloads] = useState<Record<string, DownloadItem>>({});
-  const [filter, setFilter] = useState("all");
+  const [downloads, setDownloads] = useState<Record<string, DownloadItem>>(() => {
+    try {
+      const raw = localStorage.getItem("downloads");
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [filter] = useState("all");
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [notified, setNotified] = useState<Record<string, boolean>>({});
   const downloadsRef = useRef<HTMLDivElement | null>(null);
   const dragPayloadRef = useRef<string | null>(null);
   const [fileFilter, setFileFilter] = useState("all");
+  const [selectedDownloads, setSelectedDownloads] = useState<string[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteRemember, setDeleteRemember] = useState(localStorage.getItem("downloadDeleteRemember") === "1");
 
   const addLog = (level: LogItem["level"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -186,6 +199,12 @@ export default function App() {
         addLog("warn", `downloadDir failed: ${String(err)}`);
       });
   }, [downloadPath]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("downloads", JSON.stringify(downloads));
+    } catch {}
+  }, [downloads]);
 
   const filteredDownloads = useMemo(() => {
     const list = Object.values(downloads);
@@ -275,6 +294,55 @@ export default function App() {
     } catch {}
   };
 
+  const toggleDownloadSelection = (id: string) => {
+    setSelectedDownloads((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
+  const getDownloadPath = (item: DownloadItem) => {
+    if (item.path) return item.path;
+    if (!downloadPath) return item.name;
+    return `${downloadPath.replace(/[\\/]+$/, "")}\\${item.name}`;
+  };
+
+  const applyDeleteSelection = async (action: "delete" | "remove") => {
+    const ids = selectedDownloads.slice();
+    if (ids.length === 0) return;
+    if (action === "delete") {
+      for (const id of ids) {
+        const item = downloads[id];
+        if (!item) continue;
+        const path = getDownloadPath(item);
+        try {
+          await invoke("delete_path", { path });
+        } catch (err) {
+          addLog("warn", `Delete failed: ${String(err)}`);
+        }
+      }
+    }
+    setDownloads((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => { delete next[id]; });
+      return next;
+    });
+    setSelectedDownloads([]);
+  };
+
+  const requestDeleteSelection = () => {
+    if (selectedDownloads.length === 0) return;
+    const remember = localStorage.getItem("downloadDeleteRemember") === "1";
+    const choice = localStorage.getItem("downloadDeleteChoice");
+    if (remember && (choice === "delete" || choice === "remove")) {
+      applyDeleteSelection(choice as "delete" | "remove");
+      return;
+    }
+    setDeleteDialogOpen(true);
+  };
+
   const filteredEntries = useMemo(() => {
     const normalizeExt = (name: string) => {
       const idx = name.lastIndexOf(".");
@@ -309,16 +377,9 @@ export default function App() {
 
   useEffect(() => {
     const onDragOver = (event: DragEvent) => {
-      const target = downloadsRef.current;
-      if (!target) return;
-      const rect = target.getBoundingClientRect();
-      const x = event.clientX;
-      const y = event.clientY;
-      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-        event.preventDefault();
-        if (event.dataTransfer) {
-          event.dataTransfer.dropEffect = "copy";
-        }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
       }
     };
     const onDrop = (event: DragEvent) => {
@@ -434,6 +495,7 @@ export default function App() {
         downloadDir: downloadPath,
         file_index: fileIndex
       });
+      const targetPath = `${downloadPath.replace(/[\\/]+$/, "")}\\${name}`;
       setDownloads((prev) => ({
         ...prev,
         [id]: {
@@ -442,7 +504,8 @@ export default function App() {
           downloaded: 0,
           total: 0,
           speed: 0,
-          status: "queued"
+          status: "queued",
+          path: targetPath
         }
       }));
     } catch (err) {
@@ -459,20 +522,23 @@ export default function App() {
     }
     try {
       addLog("info", `Download queued: ${folderName}`);
+      const fileName = `${folderName}.zip`;
       const id = await invoke<string>("start_folder_download", {
         folderId,
         folderName,
         downloadDir: downloadPath
       });
+      const targetPath = `${downloadPath.replace(/[\\/]+$/, "")}\\${fileName}`;
       setDownloads((prev) => ({
         ...prev,
         [id]: {
           id,
-          name: `${folderName}.zip`,
+          name: fileName,
           downloaded: 0,
           total: 0,
           speed: 0,
-          status: "queued"
+          status: "queued",
+          path: targetPath
         }
       }));
     } catch (err) {
@@ -560,22 +626,12 @@ export default function App() {
             <p className="eyebrow">Downloads</p>
             <h1>Offload Client</h1>
           </div>
-          <div className="chip-row">
-            <button className={filter === "all" ? "chip active" : "chip"} onClick={() => setFilter("all")}>
-              All
-            </button>
-            <button className={filter === "active" ? "chip active" : "chip"} onClick={() => setFilter("active")}>
-              Active
-            </button>
-            <button className={filter === "completed" ? "chip active" : "chip"} onClick={() => setFilter("completed")}>
-              Completed
-            </button>
-          </div>
         </div>
 
         <div className="download-actions">
           <button className="primary" disabled={!connected} onClick={() => loadRemote(currentFolderId)}>Refresh</button>
           <button onClick={() => Object.values(downloads).forEach((d) => pauseDownload(d.id))}>Pause All</button>
+          <button disabled={selectedDownloads.length === 0} onClick={requestDeleteSelection}>Delete Selected</button>
           <button onClick={pickDownloadDir}>Set folder</button>
           <div className="concurrency">
             <span>Parallel</span>
@@ -601,10 +657,15 @@ export default function App() {
           {filteredDownloads.map((item) => {
             const pct = item.total ? Math.min(100, Math.floor((item.downloaded / item.total) * 100)) : 0;
             const eta = item.total && item.speed ? formatDuration((item.total - item.downloaded) / item.speed) : "";
+            const isSelected = selectedDownloads.includes(item.id);
             return (
               <div
                 key={item.id}
-                className="download-card"
+                className={`download-card ${isSelected ? "selected" : ""}`}
+                onClick={(e) => {
+                  if (e.detail > 1) return;
+                  toggleDownloadSelection(item.id);
+                }}
                 onDoubleClick={() => {
                   if (item.status !== "completed") return;
                   const path = downloadPath ? `${downloadPath.replace(/[\\/]+$/, "")}\\${item.name}` : item.name;
@@ -739,6 +800,60 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {deleteDialogOpen && (
+        <div className="modal">
+          <div className="modal-card">
+            <div className="modal-header">
+              <h3>Delete selected downloads ({selectedDownloads.length})</h3>
+            </div>
+            <div className="modal-body">
+              {selectedDownloads.map((id) => {
+                const item = downloads[id];
+                if (!item) return null;
+                return (
+                  <div key={id} className="modal-path">
+                    {getDownloadPath(item)}
+                  </div>
+                );
+              })}
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={deleteRemember}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setDeleteRemember(next);
+                    localStorage.setItem("downloadDeleteRemember", next ? "1" : "0");
+                  }}
+                />
+                <span>Remember my choice</span>
+              </label>
+              <div className="modal-actions">
+                <button onClick={() => setDeleteDialogOpen(false)}>Cancel</button>
+                <button
+                  onClick={() => {
+                    localStorage.setItem("downloadDeleteChoice", "delete");
+                    setDeleteDialogOpen(false);
+                    applyDeleteSelection("delete");
+                  }}
+                >
+                  DELETE FILES
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.setItem("downloadDeleteChoice", "remove");
+                    setDeleteDialogOpen(false);
+                    applyDeleteSelection("remove");
+                  }}
+                >
+                  REMOVE FROM LIST
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -130,23 +130,7 @@ h2 {
 }
 
 .chip-row {
-  display: flex;
-  gap: 8px;
-}
-
-.chip {
-  background: transparent;
-  border: 1px solid var(--stroke);
-  color: var(--muted);
-  padding: 6px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.chip.active {
-  background: var(--accent);
-  border-color: transparent;
-  color: #041627;
+  display: none;
 }
 
 .download-actions {
@@ -207,6 +191,11 @@ button.primary {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.download-card.selected {
+  border-color: var(--accent);
+  background: #142034;
 }
 
 .download-title {
@@ -378,18 +367,96 @@ button.primary {
 }
 
 .icon {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: #2a364a;
+  display: inline-block;
+  position: relative;
 }
 
 .icon.folder {
-  background: #ffb84d;
+  width: 22px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 3px;
+}
+
+.icon.folder::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 2px;
+  width: 10px;
+  height: 6px;
+  background: #60a5fa;
+  border-radius: 2px 2px 0 0;
 }
 
 .icon.file {
-  background: #6bb3ff;
+  width: 18px;
+  height: 22px;
+  background: #1f2937;
+  border-radius: 3px;
+  border: 1px solid #334155;
+}
+
+.icon.file::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  border-left: 8px solid transparent;
+  border-top: 8px solid #64748b;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9998;
+}
+
+.modal-card {
+  background: #171a21;
+  border: 1px solid #2b3240;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 320px;
+  max-width: 520px;
+  box-shadow: 0 16px 32px rgba(0,0,0,0.4);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-path {
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .drop-zone {
