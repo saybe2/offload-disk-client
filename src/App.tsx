@@ -60,6 +60,7 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [autoLoginTried, setAutoLoginTried] = useState(false);
   const [maxConcurrent, setMaxConcurrent] = useState(() => {
     const raw = localStorage.getItem("maxConcurrent");
@@ -132,6 +133,7 @@ export default function App() {
     if (!serverUrl || !username || !password) return;
     setConnecting(true);
     setLoginError("");
+    setLoadError("");
     try {
       const key = await invoke<string>("login", { input: { server_url: serverUrl, username, password } });
       localStorage.setItem("serverUrl", serverUrl);
@@ -151,6 +153,7 @@ export default function App() {
           setLoginError("Login failed");
         }
       }
+      setConnected(false);
     } finally {
       setConnecting(false);
     }
@@ -165,12 +168,19 @@ export default function App() {
   }, [autoLoginTried, serverUrl, username, password]);
 
   const loadRemote = async (folderId: string | null) => {
-    const foldersResp = await invoke<unknown>("list_folders");
-    const archivesResp = await invoke<unknown>("list_archives", { folder_id: folderId });
-    const folderData = (foldersResp as any).folders || [];
-    const archiveData = (archivesResp as any).archives || [];
-    setFolders(folderData);
-    setArchives(archiveData);
+    try {
+      const foldersResp = await invoke<unknown>("list_folders");
+      const archivesResp = await invoke<unknown>("list_archives", { folder_id: folderId });
+      const folderData = (foldersResp as any).folders || [];
+      const archiveData = (archivesResp as any).archives || [];
+      setFolders(folderData);
+      setArchives(archiveData);
+      setLoadError("");
+    } catch (err) {
+      console.error(err);
+      setLoadError("Failed to load remote data. Check server and credentials.");
+      throw err;
+    }
   };
 
   const pickDownloadDir = async () => {
@@ -378,6 +388,10 @@ export default function App() {
             <button onClick={() => connect(false)} disabled={connecting}>Connect</button>
           </div>
         </div>
+
+        {loadError && (
+          <div className="login-error">{loadError}</div>
+        )}
 
         <div className="breadcrumb">
           {breadcrumb.map((item, index) => (
