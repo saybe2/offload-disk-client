@@ -606,6 +606,11 @@ fn emit_progress(app: &AppHandle, id: &str, downloaded: u64, total: Option<u64>,
 fn log_event(app: &AppHandle, level: &str, message: &str) {
   let payload = json!({ "level": level, "message": message });
   let _ = app.emit_all("client-log", payload);
+  if level == "error" {
+    eprintln!("[{}] {}", level, message);
+  } else {
+    println!("[{}] {}", level, message);
+  }
   let mut wrote = false;
   if let Some(dir) = tauri::api::path::app_log_dir(&app.config()) {
     let _ = std::fs::create_dir_all(&dir);
@@ -635,6 +640,11 @@ fn log_event(app: &AppHandle, level: &str, message: &str) {
   }
 }
 
+#[tauri::command]
+fn client_log(app: AppHandle, level: String, message: String) {
+  log_event(&app, &level, &message);
+}
+
 fn main() {
   tauri::Builder::default()
     .manage(DownloadManager::new())
@@ -645,7 +655,8 @@ fn main() {
       list_archives,
       start_archive_download,
       pause_download,
-      list_downloads
+      list_downloads,
+      client_log
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

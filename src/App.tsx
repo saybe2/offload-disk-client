@@ -35,6 +35,11 @@ type LogItem = {
   message: string;
 };
 
+type LogEntry = {
+  ts: string;
+  level: string;
+  message: string;
+};
 function formatSize(bytes?: number) {
   if (!bytes && bytes !== 0) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -87,6 +92,15 @@ export default function App() {
       const next = [...prev, { ts, level, message }].slice(-200);
       return next;
     });
+    const line = `[${ts}] ${level.toUpperCase()} ${message}`;
+    if (level === "error") {
+      console.error(line);
+    } else if (level === "warn") {
+      console.warn(line);
+    } else {
+      console.log(line);
+    }
+    invoke("client_log", { level, message }).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -104,15 +118,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const unlisten = listen<any>("client-log", (event) => {
-      const payload = event.payload || {};
-      addLog(payload.level || "info", payload.message || "");
-    });
-    return () => {
-      unlisten.then((f) => f());
-    };
-  }, []);
 
   useEffect(() => {
     const onError = (event: ErrorEvent) => {
@@ -259,6 +264,7 @@ export default function App() {
       setFolders(folderData);
       setArchives(archiveData);
       setLoadError("");
+      addLog("info", `Loaded folders=${folderData.length} archives=${archiveData.length}`);
     } catch (err) {
       console.error(err);
       setLoadError("Failed to load remote data. Check server and credentials.");
@@ -425,17 +431,6 @@ export default function App() {
           })}
         </div>
 
-        <div className="log-panel">
-          <div className="log-header">Logs</div>
-          <div className="log-list">
-            {logs.map((log, idx) => (
-              <div key={`${log.ts}-${idx}`} className={`log-item ${log.level}`}>
-                <span className="log-ts">{log.ts}</span>
-                <span className="log-msg">{log.message}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </aside>
 
       <main className="browser-panel">
