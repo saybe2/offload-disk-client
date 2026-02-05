@@ -29,6 +29,12 @@ type DownloadItem = {
   status: string;
 };
 
+type LogItem = {
+  ts: string;
+  level: "info" | "error" | "warn";
+  message: string;
+};
+
 function formatSize(bytes?: number) {
   if (!bytes && bytes !== 0) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -73,6 +79,15 @@ export default function App() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [downloads, setDownloads] = useState<Record<string, DownloadItem>>({});
   const [filter, setFilter] = useState("all");
+  const [logs, setLogs] = useState<LogItem[]>([]);
+
+  const addLog = (level: LogItem["level"], message: string) => {
+    const ts = new Date().toLocaleTimeString();
+    setLogs((prev) => {
+      const next = [...prev, { ts, level, message }].slice(-200);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const unlisten = listen<DownloadItem>("download-progress", (event) => {
@@ -83,6 +98,16 @@ export default function App() {
           ...event.payload
         }
       }));
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen<any>("client-log", (event) => {
+      const payload = event.payload || {};
+      addLog(payload.level || "info", payload.message || "");
     });
     return () => {
       unlisten.then((f) => f());
@@ -135,6 +160,7 @@ export default function App() {
     setLoginError("");
     setLoadError("");
     try {
+      addLog("info", "Login start");
       const key = await invoke<string>("login", { input: { server_url: serverUrl, username, password } });
       localStorage.setItem("serverUrl", serverUrl);
       localStorage.setItem("username", username);
@@ -143,6 +169,7 @@ export default function App() {
       if (downloadPath) localStorage.setItem("downloadPath", downloadPath);
       setConnected(true);
       await loadRemote(null);
+      addLog("info", "Login success");
     } catch (err) {
       console.error(err);
       if (!silent) {
@@ -154,6 +181,7 @@ export default function App() {
         }
       }
       setConnected(false);
+      addLog("error", `Login failed: ${String(err)}`);
     } finally {
       setConnecting(false);
     }
@@ -169,6 +197,7 @@ export default function App() {
 
   const loadRemote = async (folderId: string | null) => {
     try {
+      addLog("info", "Loading folders and files");
       const foldersResp = await invoke<unknown>("list_folders");
       const archivesResp = await invoke<unknown>("list_archives", { folder_id: folderId });
       const folderData = (foldersResp as any).folders || [];
@@ -179,6 +208,7 @@ export default function App() {
     } catch (err) {
       console.error(err);
       setLoadError("Failed to load remote data. Check server and credentials.");
+      addLog("error", `Load failed: ${String(err)}`);
       throw err;
     }
   };
@@ -197,6 +227,7 @@ export default function App() {
       return;
     }
     try {
+      addLog("info", `Download queued: ${name}`);
       const id = await invoke<string>("start_archive_download", {
         archiveId,
         download_dir: downloadPath,
@@ -216,8 +247,10 @@ export default function App() {
     } catch (err) {
       console.error(err);
       alert("Download start failed");
+      addLog("error", `Download start failed: ${String(err)}`);
     }
   };
+
 
   const enqueueDownload = (archiveId: string, name: string, fileIndex?: number) => {
     const active = Object.values(downloads).filter((d) => !["completed", "error", "paused"].includes(d.status)).length;
@@ -374,6 +407,18 @@ export default function App() {
               </div>
             );
           })}
+        </div>
+
+        <div className="log-panel">
+          <div className="log-header">Logs</div>
+          <div className="log-list">
+            {logs.map((log, idx) => (
+              <div key={`${log.ts}-${idx}`} className={`log-item ${log.level}`}>
+                <span className="log-ts">{log.ts}</span>
+                <span className="log-msg">{log.message}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </aside>
 

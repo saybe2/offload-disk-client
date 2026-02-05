@@ -10,6 +10,7 @@ use base64::engine::general_purpose::STANDARD as base64_engine;
 use base64::Engine;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
@@ -264,6 +265,7 @@ async fn start_archive_download(
   tauri::async_runtime::spawn(async move {
     let api_state = app_handle.state::<ApiState>();
     let downloads_state = app_handle.state::<DownloadManager>();
+    log_event(&app_handle, "info", &format!("download start archive={} name={}", archive_id, safe_name));
     let total = parts.originalSize.or(parts.encryptedSize);
     let mut downloaded: u64 = 0;
     let mut last_tick = Instant::now();
@@ -323,9 +325,11 @@ async fn start_archive_download(
 
       if !direct_ok {
         let relay_path = format!("/api/archives/{}/parts/{}/relay", archive_id, part.index);
+        log_event(&app_handle, "info", &format!("relay part {} via server", part.index));
         if download_part_relay(&api_state, &relay_path, &part_path, cancel.clone()).await.is_err() {
           emit_progress(&app_handle, &task_id, downloaded, total, 0, "error".to_string(), safe_name.clone());
           update_status(&downloads_state, &task_id, "error".to_string());
+          log_event(&app_handle, "error", &format!("download failed archive={}", archive_id));
           return;
         }
       }
@@ -351,12 +355,14 @@ async fn start_archive_download(
     if let Err(_) = decrypt_parts(&parts, &temp_dir, &dest_path, &master_key, file_index.map(|v| v as usize)) {
       emit_progress(&app_handle, &task_id, downloaded, total, 0, "error".to_string(), safe_name.clone());
       update_status(&downloads_state, &task_id, "error".to_string());
+      log_event(&app_handle, "error", &format!("decrypt failed archive={}", archive_id));
       return;
     }
 
     let _ = std::fs::remove_dir_all(&temp_dir);
     emit_progress(&app_handle, &task_id, downloaded, total, 0, "completed".to_string(), safe_name.clone());
     update_status(&downloads_state, &task_id, "completed".to_string());
+    log_event(&app_handle, "info", &format!("download completed archive={}", archive_id));
   });
 
   Ok(id)
@@ -595,6 +601,18 @@ fn emit_progress(app: &AppHandle, id: &str, downloaded: u64, total: Option<u64>,
     name
   };
   let _ = app.emit_all("download-progress", payload);
+}
+
+fn log_event(app: &AppHandle, level: &str, message: &str) {
+  let payload = json!({ "level": level, "message": message });
+  let _ = app.emit_all("client-log", payload);
+  if let Some(dir) = tauri::api::path::app_log_dir(&app.config()) {
+    let _ = std::fs::create_dir_all(&dir);
+    let log_path = dir.join("offload-client.log");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+      let _ = writeln!(file, "[{}] {}", level, message);
+    }
+  }
 }
 
 fn main() {
