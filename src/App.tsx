@@ -113,6 +113,8 @@ export default function App() {
   const [selectedDownloads, setSelectedDownloads] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteRemember, setDeleteRemember] = useState(localStorage.getItem("downloadDeleteRemember") === "1");
+  const [manualDragPayload, setManualDragPayload] = useState<string | null>(null);
+  const [manualDragOver, setManualDragOver] = useState(false);
 
   const addLog = (level: LogItem["level"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -296,6 +298,14 @@ export default function App() {
     } catch {}
   };
 
+  const goUpFolder = () => {
+    if (!currentFolderId) return;
+    const current = folderMap[currentFolderId];
+    const parent = current?.parentId ? normalizeId(current.parentId) : null;
+    setCurrentFolderId(parent);
+    loadRemote(parent);
+  };
+
   const toggleDownloadSelection = (id: string) => {
     setSelectedDownloads((prev) => {
       if (prev.includes(id)) {
@@ -408,6 +418,33 @@ export default function App() {
     };
   }, [handleDropPayload]);
 
+  useEffect(() => {
+    if (!manualDragPayload) return;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.cursor = "grabbing";
+    const onMove = (event: MouseEvent) => {
+      const target = downloadsRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+      setManualDragOver(inside);
+    };
+    const onUp = () => {
+      if (manualDragOver) {
+        handleDropPayload(manualDragPayload);
+      }
+      setManualDragPayload(null);
+      setManualDragOver(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp, { once: true });
+    return () => {
+      document.body.style.cursor = prevCursor;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [manualDragPayload, manualDragOver, handleDropPayload]);
+
   const connect = async (silent = false) => {
     if (!serverUrl || !username || !password) return;
     setConnecting(true);
@@ -500,7 +537,7 @@ export default function App() {
       const id = await invoke<string>("start_archive_download", {
         archiveId,
         downloadDir: downloadPath,
-        file_index: fileIndex
+        fileIndex
       });
       const targetPath = `${downloadPath.replace(/[\\/]+$/, "")}\\${name}`;
       setDownloads((prev) => ({
@@ -614,6 +651,7 @@ export default function App() {
       <div className="app-shell">
       <aside
         className="downloads-panel"
+        data-drag-over={manualDragOver ? "true" : "false"}
         ref={downloadsRef}
         onDragOverCapture={(e) => {
           e.preventDefault();
@@ -767,7 +805,7 @@ export default function App() {
             <span>Size</span>
           </div>
           {currentFolderId && (
-            <div className="table-row folder" onClick={() => { setCurrentFolderId(null); loadRemote(null); }}>
+            <div className="table-row folder" onClick={goUpFolder}>
               <span className="row-name"><span className="icon folder" />..</span>
               <span>Folder</span>
               <span />
@@ -777,13 +815,11 @@ export default function App() {
             <div
               key={folder._id}
               className="table-row folder"
-              draggable
-              onDragStart={(e) => {
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
                 const payload = JSON.stringify({ folderId: folder._id, folderName: folder.name });
-                e.dataTransfer.effectAllowed = "copy";
-                e.dataTransfer.setData("application/json", payload);
-                e.dataTransfer.setData("text/plain", payload);
                 dragPayloadRef.current = payload;
+                setManualDragPayload(payload);
                 addLog("info", `Drag start folder ${folder.name}`);
               }}
               onClick={() => { const nextId = normalizeId(folder._id); setCurrentFolderId(nextId); loadRemote(nextId); }}
@@ -798,13 +834,11 @@ export default function App() {
               key={file.key}
               className={`table-row file ${file.bundleId ? "bundle" : ""}`}
               style={file.bundleId ? { ["--bundle-hue" as any]: bundleHue(file.bundleId) } : undefined}
-              draggable
-              onDragStart={(e) => {
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
                 const payload = JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex });
-                e.dataTransfer.effectAllowed = "copy";
-                e.dataTransfer.setData("application/json", payload);
-                e.dataTransfer.setData("text/plain", payload);
                 dragPayloadRef.current = payload;
+                setManualDragPayload(payload);
                 addLog("info", `Drag start file ${file.name}`);
               }}
               onDoubleClick={() => enqueueDownload(file.archiveId, file.name, file.fileIndex)}

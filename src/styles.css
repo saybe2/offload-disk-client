@@ -107,6 +107,11 @@ body {
   min-height: 0;
 }
 
+.downloads-panel[data-drag-over="true"] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 6px;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
