@@ -15,11 +15,15 @@
         "title": "Offload Disk Client",
         "width": 1280,
         "height": 820,
-        "resizable": true
+        "resizable": true,
+        "devtools": true
       }
     ],
     "allowlist": {
       "http": {
+        "all": true
+      },
+      "path": {
         "all": true
       },
       "dialog": {

@@ -621,7 +621,16 @@ fn log_event(app: &AppHandle, level: &str, message: &str) {
       let log_path = dir.join("offload-client.log");
       if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
         let _ = writeln!(file, "[{}] {}", level, message);
+        wrote = true;
       }
+    }
+  }
+  if !wrote {
+    let dir = std::env::temp_dir().join("offload-disk-client");
+    let _ = std::fs::create_dir_all(&dir);
+    let log_path = dir.join("offload-client.log");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+      let _ = writeln!(file, "[{}] {}", level, message);
     }
   }
 }
