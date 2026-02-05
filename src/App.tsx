@@ -98,6 +98,8 @@ export default function App() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [notified, setNotified] = useState<Record<string, boolean>>({});
   const downloadsRef = useRef<HTMLDivElement | null>(null);
+  const dragPayloadRef = useRef<string | null>(null);
+  const [fileFilter, setFileFilter] = useState("all");
 
   const addLog = (level: LogItem["level"], message: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -257,15 +259,53 @@ export default function App() {
   }, [currentArchives]);
 
   const handleDropPayload = (payload: string | null) => {
-    if (!payload) return;
+    const raw = payload || dragPayloadRef.current;
+    if (!raw) return;
     try {
-      const parsed = JSON.parse(payload);
+      const parsed = JSON.parse(raw);
       if (parsed?.archiveId) {
         const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
         enqueueDownload(parsed.archiveId, name, parsed.fileIndex);
+        return;
+      }
+      if (parsed?.folderId) {
+        const folderName = parsed.folderName || "folder";
+        startFolderDownloadNow(parsed.folderId, folderName);
       }
     } catch {}
   };
+
+  const filteredEntries = useMemo(() => {
+    const normalizeExt = (name: string) => {
+      const idx = name.lastIndexOf(".");
+      return idx >= 0 ? name.slice(idx + 1).toLowerCase() : "";
+    };
+    const archiveExts = new Set(["zip", "rar", "7z", "tar", "gz", "bz2", "xz"]);
+    const videoExts = new Set(["mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v"]);
+    const musicExts = new Set(["mp3", "flac", "wav", "aac", "ogg", "m4a", "opus"]);
+    const statusLower = (value: string | undefined) => (value || "").toLowerCase();
+
+    return currentEntries.filter((file) => {
+      const status = statusLower(file.status);
+      const ext = normalizeExt(file.name);
+      switch (fileFilter) {
+        case "missing":
+          return status === "error" || status === "missing" || status === "lost";
+        case "active":
+          return ["queued", "processing", "uploading", "streaming", "pending"].includes(status);
+        case "completed":
+          return status === "ready";
+        case "archives":
+          return archiveExts.has(ext);
+        case "video":
+          return videoExts.has(ext);
+        case "music":
+          return musicExts.has(ext);
+        default:
+          return true;
+      }
+    });
+  }, [currentEntries, fileFilter]);
 
   useEffect(() => {
     const onDragOver = (event: DragEvent) => {
@@ -399,6 +439,36 @@ export default function App() {
         [id]: {
           id,
           name,
+          downloaded: 0,
+          total: 0,
+          speed: 0,
+          status: "queued"
+        }
+      }));
+    } catch (err) {
+      console.error(err);
+      alert("Download start failed");
+      addLog("error", `Download start failed: ${String(err)}`);
+    }
+  };
+
+  const startFolderDownloadNow = async (folderId: string, folderName: string) => {
+    if (!downloadPath) {
+      alert("Set download folder first");
+      return;
+    }
+    try {
+      addLog("info", `Download queued: ${folderName}`);
+      const id = await invoke<string>("start_folder_download", {
+        folderId,
+        folderName,
+        downloadDir: downloadPath
+      });
+      setDownloads((prev) => ({
+        ...prev,
+        [id]: {
+          id,
+          name: `${folderName}.zip`,
           downloaded: 0,
           total: 0,
           speed: 0,
@@ -577,6 +647,20 @@ export default function App() {
           </div>
         </div>
 
+        <div className="filter-row">
+          <label>Фильтр файлов</label>
+          <select value={fileFilter} onChange={(e) => setFileFilter(e.target.value)}>
+            <option value="all">All files</option>
+            <option value="missing">Missing Files</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+            <option disabled>────────</option>
+            <option value="archives">Archives</option>
+            <option value="video">Video</option>
+            <option value="music">Music</option>
+          </select>
+        </div>
+
         {loadError && (
           <div className="login-error">{loadError}</div>
         )}
@@ -601,13 +685,25 @@ export default function App() {
             </div>
           )}
           {currentFolders.map((folder) => (
-            <div key={folder._id} className="table-row folder" onClick={() => { const nextId = normalizeId(folder._id); setCurrentFolderId(nextId); loadRemote(nextId); }}>
+            <div
+              key={folder._id}
+              className="table-row folder"
+              draggable
+              onDragStart={(e) => {
+                const payload = JSON.stringify({ folderId: folder._id, folderName: folder.name });
+                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("application/json", payload);
+                e.dataTransfer.setData("text/plain", payload);
+                dragPayloadRef.current = payload;
+              }}
+              onClick={() => { const nextId = normalizeId(folder._id); setCurrentFolderId(nextId); loadRemote(nextId); }}
+            >
               <span className="row-name"><span className="icon folder" />{folder.name}</span>
               <span>Folder</span>
               <span />
             </div>
           ))}
-          {currentEntries.map((file) => (
+          {filteredEntries.map((file) => (
             <div
               key={file.key}
               className={`table-row file ${file.bundleId ? "bundle" : ""}`}
@@ -618,6 +714,7 @@ export default function App() {
                 e.dataTransfer.effectAllowed = "copy";
                 e.dataTransfer.setData("application/json", payload);
                 e.dataTransfer.setData("text/plain", payload);
+                dragPayloadRef.current = payload;
               }}
               onDoubleClick={() => enqueueDownload(file.archiveId, file.name, file.fileIndex)}
             >

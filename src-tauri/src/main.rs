@@ -370,6 +370,128 @@ async fn start_archive_download(
   Ok(id)
 }
 
+#[tauri::command]
+async fn start_folder_download(
+  app: AppHandle,
+  downloads: State<'_, DownloadManager>,
+  folder_id: String,
+  folder_name: String,
+  download_dir: String
+) -> Result<String, String> {
+  let id = Uuid::new_v4().to_string();
+  let task_id = id.clone();
+
+  let safe_folder = sanitize_filename(&folder_name);
+  let file_name = if safe_folder.ends_with(".zip") {
+    safe_folder
+  } else {
+    format!("{}.zip", safe_folder)
+  };
+  let dest_path = Path::new(&download_dir).join(&file_name);
+
+  let item = DownloadItem {
+    id: id.clone(),
+    archive_id: folder_id.clone(),
+    name: file_name.clone(),
+    downloaded: 0,
+    total: None,
+    status: "queued".to_string()
+  };
+
+  let cancel = Arc::new(AtomicBool::new(false));
+  {
+    let mut tasks = downloads.tasks.lock().unwrap();
+    tasks.insert(id.clone(), DownloadTask { item: item.clone(), cancel: cancel.clone() });
+  }
+
+  let app_handle = app.clone();
+  tauri::async_runtime::spawn(async move {
+    let downloads_state = app_handle.state::<DownloadManager>();
+    let api_state = app_handle.state::<ApiState>();
+    log_event(&app_handle, "info", &format!("folder download start id={} name={}", folder_id, file_name));
+    let (client, base_url) = match api_client(&api_state).await {
+      Ok(data) => data,
+      Err(err) => {
+        emit_progress(&app_handle, &task_id, 0, None, 0, "error".to_string(), file_name.clone());
+        update_status(&downloads_state, &task_id, "error".to_string());
+        log_event(&app_handle, "error", &format!("folder download failed: {}", err));
+        return;
+      }
+    };
+
+    let url = format!("{}/api/folders/{}/download", base_url, folder_id);
+    let response = match client.get(url).send().await {
+      Ok(res) => res,
+      Err(err) => {
+        emit_progress(&app_handle, &task_id, 0, None, 0, "error".to_string(), file_name.clone());
+        update_status(&downloads_state, &task_id, "error".to_string());
+        log_event(&app_handle, "error", &format!("folder download failed: {}", err));
+        return;
+      }
+    };
+
+    if !response.status().is_success() {
+      emit_progress(&app_handle, &task_id, 0, None, 0, "error".to_string(), file_name.clone());
+      update_status(&downloads_state, &task_id, "error".to_string());
+      log_event(&app_handle, "error", &format!("folder download failed status={}", response.status().as_u16()));
+      return;
+    }
+
+    let total = response.content_length();
+    let mut downloaded: u64 = 0;
+    let mut last_tick = Instant::now();
+    let mut last_bytes = 0;
+
+    let mut file = match OpenOptions::new().create(true).write(true).truncate(true).open(&dest_path) {
+      Ok(f) => f,
+      Err(err) => {
+        emit_progress(&app_handle, &task_id, 0, total, 0, "error".to_string(), file_name.clone());
+        update_status(&downloads_state, &task_id, "error".to_string());
+        log_event(&app_handle, "error", &format!("folder download open failed: {}", err));
+        return;
+      }
+    };
+
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+      if cancel.load(Ordering::SeqCst) {
+        emit_progress(&app_handle, &task_id, downloaded, total, 0, "paused".to_string(), file_name.clone());
+        update_status(&downloads_state, &task_id, "paused".to_string());
+        return;
+      }
+      let data = match chunk {
+        Ok(data) => data,
+        Err(err) => {
+          emit_progress(&app_handle, &task_id, downloaded, total, 0, "error".to_string(), file_name.clone());
+          update_status(&downloads_state, &task_id, "error".to_string());
+          log_event(&app_handle, "error", &format!("folder download failed: {}", err));
+          return;
+        }
+      };
+      if let Err(err) = file.write_all(&data) {
+        emit_progress(&app_handle, &task_id, downloaded, total, 0, "error".to_string(), file_name.clone());
+        update_status(&downloads_state, &task_id, "error".to_string());
+        log_event(&app_handle, "error", &format!("folder download write failed: {}", err));
+        return;
+      }
+      downloaded += data.len() as u64;
+      if last_tick.elapsed() >= Duration::from_millis(500) {
+        let delta = downloaded - last_bytes;
+        let speed = (delta as f64 / last_tick.elapsed().as_secs_f64()) as u64;
+        emit_progress(&app_handle, &task_id, downloaded, total, speed, "downloading".to_string(), file_name.clone());
+        last_tick = Instant::now();
+        last_bytes = downloaded;
+      }
+    }
+
+    emit_progress(&app_handle, &task_id, downloaded, total, 0, "completed".to_string(), file_name.clone());
+    update_status(&downloads_state, &task_id, "completed".to_string());
+    log_event(&app_handle, "info", &format!("folder download completed id={}", folder_id));
+  });
+
+  Ok(id)
+}
+
 async fn verify_part_hash(path: &Path, expected: &str) -> Result<bool, String> {
   if !path.exists() {
     return Ok(false);
@@ -654,6 +776,7 @@ fn main() {
       list_folders,
       list_archives,
       start_archive_download,
+      start_folder_download,
       pause_download,
       list_downloads,
       client_log,

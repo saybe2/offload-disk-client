@@ -310,7 +310,8 @@ button.primary {
 }
 
 .browser-table {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
   flex: 1;
   overflow: auto;
@@ -324,6 +325,23 @@ button.primary {
   gap: 12px;
   padding: 10px 14px;
   border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.filter-row select {
+  background: #0b111b;
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
 }
 
 .table-head {
