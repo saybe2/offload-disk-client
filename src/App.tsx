@@ -169,6 +169,45 @@ export default function App() {
     return archives.filter((a) => (a.folderId || null) === currentFolderId);
   }, [archives, currentFolderId]);
 
+  const bundleHue = (bundleId: string) => {
+    let hash = 0;
+    for (let i = 0; i < bundleId.length; i += 1) {
+      hash = (hash * 31 + bundleId.charCodeAt(i)) % 360;
+    }
+    return hash;
+  };
+
+  const currentEntries = useMemo(() => {
+    const entries: { key: string; archiveId: string; fileIndex?: number; name: string; status: string; size?: number; bundleId?: string }[] = [];
+    currentArchives.forEach((archive) => {
+      if (archive.isBundle && archive.files && archive.files.length > 1) {
+        archive.files.forEach((file, index) => {
+          const name = file.originalName || `file_${index + 1}`;
+          entries.push({
+            key: `${archive._id}_${index}`,
+            archiveId: archive._id,
+            fileIndex: index,
+            name,
+            status: archive.status,
+            size: file.size,
+            bundleId: archive._id
+          });
+        });
+      } else {
+        const name = archive.displayName || archive.downloadName || archive.name || "file";
+        const size = archive.originalSize || archive.files?.[0]?.size;
+        entries.push({
+          key: archive._id,
+          archiveId: archive._id,
+          name,
+          status: archive.status,
+          size
+        });
+      }
+    });
+    return entries;
+  }, [currentArchives]);
+
   const connect = async (silent = false) => {
     if (!serverUrl || !username || !password) return;
     setConnecting(true);
@@ -320,44 +359,6 @@ export default function App() {
     );
   }
 
-  const bundleHue = (bundleId: string) => {
-    let hash = 0;
-    for (let i = 0; i < bundleId.length; i += 1) {
-      hash = (hash * 31 + bundleId.charCodeAt(i)) % 360;
-    }
-    return hash;
-  };
-
-  const currentEntries = useMemo(() => {
-    const entries: { key: string; archiveId: string; fileIndex?: number; name: string; status: string; size?: number; bundleId?: string }[] = [];
-    currentArchives.forEach((archive) => {
-      if (archive.isBundle && archive.files && archive.files.length > 1) {
-        archive.files.forEach((file, index) => {
-          const name = file.originalName || `file_${index + 1}`;
-          entries.push({
-            key: `${archive._id}_${index}`,
-            archiveId: archive._id,
-            fileIndex: index,
-            name,
-            status: archive.status,
-            size: file.size,
-            bundleId: archive._id
-          });
-        });
-      } else {
-        const name = archive.displayName || archive.downloadName || archive.name || "file";
-        const size = archive.originalSize || archive.files?.[0]?.size;
-        entries.push({
-          key: archive._id,
-          archiveId: archive._id,
-          name,
-          status: archive.status,
-          size
-        });
-      }
-    });
-    return entries;
-  }, [currentArchives]);
 
   return (
     <div className="app-shell">

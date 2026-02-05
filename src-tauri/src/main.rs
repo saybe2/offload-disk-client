@@ -606,11 +606,22 @@ fn emit_progress(app: &AppHandle, id: &str, downloaded: u64, total: Option<u64>,
 fn log_event(app: &AppHandle, level: &str, message: &str) {
   let payload = json!({ "level": level, "message": message });
   let _ = app.emit_all("client-log", payload);
+  let mut wrote = false;
   if let Some(dir) = tauri::api::path::app_log_dir(&app.config()) {
     let _ = std::fs::create_dir_all(&dir);
     let log_path = dir.join("offload-client.log");
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
       let _ = writeln!(file, "[{}] {}", level, message);
+      wrote = true;
+    }
+  }
+  if !wrote {
+    if let Some(dir) = tauri::api::path::app_data_dir(&app.config()) {
+      let _ = std::fs::create_dir_all(&dir);
+      let log_path = dir.join("offload-client.log");
+      if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        let _ = writeln!(file, "[{}] {}", level, message);
+      }
     }
   }
 }
