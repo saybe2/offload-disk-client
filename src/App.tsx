@@ -393,6 +393,7 @@ export default function App() {
       if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
       event.preventDefault();
       const payload = event.dataTransfer?.getData("application/json") || event.dataTransfer?.getData("text/plain") || null;
+      addLog("info", "Drop window");
       handleDropPayload(payload);
     };
     window.addEventListener("dragover", onDragOver, true);
@@ -618,17 +619,24 @@ export default function App() {
           e.preventDefault();
           if (e.dataTransfer) {
             e.dataTransfer.dropEffect = "copy";
+            e.dataTransfer.effectAllowed = "copy";
           }
+        }}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          addLog("info", "Drag enter downloads");
         }}
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer) {
             e.dataTransfer.dropEffect = "copy";
+            e.dataTransfer.effectAllowed = "copy";
           }
         }}
         onDropCapture={(e) => {
           e.preventDefault();
           const payload = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+          addLog("info", "Drop on downloads");
           handleDropPayload(payload);
         }}
       >
@@ -776,6 +784,7 @@ export default function App() {
                 e.dataTransfer.setData("application/json", payload);
                 e.dataTransfer.setData("text/plain", payload);
                 dragPayloadRef.current = payload;
+                addLog("info", `Drag start folder ${folder.name}`);
               }}
               onClick={() => { const nextId = normalizeId(folder._id); setCurrentFolderId(nextId); loadRemote(nextId); }}
             >
@@ -796,6 +805,7 @@ export default function App() {
                 e.dataTransfer.setData("application/json", payload);
                 e.dataTransfer.setData("text/plain", payload);
                 dragPayloadRef.current = payload;
+                addLog("info", `Drag start file ${file.name}`);
               }}
               onDoubleClick={() => enqueueDownload(file.archiveId, file.name, file.fileIndex)}
             >
