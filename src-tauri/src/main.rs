@@ -75,8 +75,7 @@ impl ApiState {
 struct LoginRequest {
   server_url: String,
   username: String,
-  password: String,
-  master_key: String
+  password: String
 }
 
 #[derive(Deserialize)]
@@ -158,7 +157,7 @@ async fn api_post(state: &State<'_, ApiState>, path: &str) -> Result<reqwest::Re
 }
 
 #[tauri::command]
-async fn login(state: State<'_, ApiState>, input: LoginRequest) -> Result<(), String> {
+async fn login(state: State<'_, ApiState>, input: LoginRequest) -> Result<String, String> {
   let base_url = input.server_url.trim_end_matches('/').to_string();
   let client = reqwest::Client::builder()
     .cookie_store(true)
@@ -179,8 +178,15 @@ async fn login(state: State<'_, ApiState>, input: LoginRequest) -> Result<(), St
 
   *state.base_url.lock().unwrap() = base_url;
   *state.client.lock().unwrap() = Some(client);
-  *state.master_key.lock().unwrap() = Some(input.master_key);
-  Ok(())
+
+  let key_res = api_get(&state, "/api/auth/master-key").await?;
+  if !key_res.status().is_success() {
+    return Err(format!("master_key_unavailable:{}", key_res.status().as_u16()));
+  }
+  let key_json = key_res.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
+  let master_key = key_json.get("masterKey").and_then(|v| v.as_str()).ok_or("missing_master_key")?.to_string();
+  *state.master_key.lock().unwrap() = Some(master_key.clone());
+  Ok(master_key)
 }
 
 #[tauri::command]
@@ -208,7 +214,8 @@ async fn start_archive_download(
   state: State<'_, ApiState>,
   downloads: State<'_, DownloadManager>,
   archive_id: String,
-  download_dir: String
+  download_dir: String,
+  file_index: Option<u32>
 ) -> Result<String, String> {
   let id = Uuid::new_v4().to_string();
   let task_id = id.clone();
@@ -221,7 +228,16 @@ async fn start_archive_download(
   }
   let parts = res.json::<PartsResponse>().await.map_err(|e| e.to_string())?;
 
-  let download_name = parts.downloadName.clone().or(parts.displayName.clone()).unwrap_or_else(|| "download.bin".to_string());
+  let download_name = if let Some(index) = file_index {
+    parts.files.as_ref()
+      .and_then(|files| files.get(index as usize))
+      .and_then(|f| f.originalName.clone())
+      .or(parts.downloadName.clone())
+      .or(parts.displayName.clone())
+      .unwrap_or_else(|| "download.bin".to_string())
+  } else {
+    parts.downloadName.clone().or(parts.displayName.clone()).unwrap_or_else(|| "download.bin".to_string())
+  };
   let safe_name = sanitize_filename(&download_name);
   let dest_path = Path::new(&download_dir).join(&safe_name);
 
@@ -332,7 +348,7 @@ async fn start_archive_download(
       }
     }
 
-    if let Err(_) = decrypt_parts(&parts, &temp_dir, &dest_path, &master_key) {
+    if let Err(_) = decrypt_parts(&parts, &temp_dir, &dest_path, &master_key, file_index.map(|v| v as usize)) {
       emit_progress(&app_handle, &task_id, downloaded, total, 0, "error".to_string(), safe_name.clone());
       update_status(&downloads_state, &task_id, "error".to_string());
       return;
@@ -408,7 +424,7 @@ async fn refresh_part_url(state: &State<'_, ApiState>, archive_id: &str, index: 
   Ok(url.to_string())
 }
 
-fn decrypt_parts(parts: &PartsResponse, temp_dir: &Path, output_path: &Path, master_key: &str) -> Result<(), String> {
+fn decrypt_parts(parts: &PartsResponse, temp_dir: &Path, output_path: &Path, master_key: &str, file_index: Option<usize>) -> Result<(), String> {
   let key = derive_key(master_key);
   let iv = base64_engine.decode(parts.iv.as_bytes()).map_err(|e| e.to_string())?;
   let auth_tag = base64_engine.decode(parts.authTag.as_bytes()).map_err(|e| e.to_string())?;
@@ -424,7 +440,8 @@ fn decrypt_parts(parts: &PartsResponse, temp_dir: &Path, output_path: &Path, mas
   sorted.sort_by_key(|p| p.index);
 
   let tmp_out = output_path.with_extension("download");
-  let mut out_file = OpenOptions::new().create(true).write(true).truncate(true).open(&tmp_out).map_err(|e| e.to_string())?;
+  let decrypt_target = if file_index.is_some() { tmp_out.with_extension("zip") } else { tmp_out.clone() };
+  let mut out_file = OpenOptions::new().create(true).write(true).truncate(true).open(&decrypt_target).map_err(|e| e.to_string())?;
 
   let cipher = Aes256::new_from_slice(&key).map_err(|e| e.to_string())?;
   let mut j0 = [0u8; 16];
@@ -468,11 +485,44 @@ fn decrypt_parts(parts: &PartsResponse, temp_dir: &Path, output_path: &Path, mas
     expected[i] ^= tag_mask[i];
   }
   if expected != auth_tag.as_slice() {
-    let _ = std::fs::remove_file(&tmp_out);
+    let _ = std::fs::remove_file(&decrypt_target);
     return Err("auth_tag_mismatch".to_string());
   }
 
-  std::fs::rename(&tmp_out, output_path).map_err(|e| e.to_string())?;
+  if let Some(index) = file_index {
+    extract_zip_entry(&decrypt_target, output_path, parts, index)?;
+    let _ = std::fs::remove_file(&decrypt_target);
+  } else {
+    std::fs::rename(&decrypt_target, output_path).map_err(|e| e.to_string())?;
+  }
+  Ok(())
+}
+
+fn extract_zip_entry(zip_path: &Path, output_path: &Path, parts: &PartsResponse, file_index: usize) -> Result<(), String> {
+  let target_name = parts.files.as_ref()
+    .and_then(|files| files.get(file_index))
+    .and_then(|file| file.originalName.clone())
+    .unwrap_or_else(|| format!("file_{}", file_index + 1));
+  let entry_name = target_name.replace(['\\', '/'], "_");
+
+  let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
+  let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+
+  let has_name = archive.file_names().any(|name| name == entry_name);
+  let mut entry = if has_name {
+    archive.by_name(&entry_name).map_err(|e| e.to_string())?
+  } else {
+    archive.by_index(file_index).map_err(|e| e.to_string())?
+  };
+  if entry.is_dir() {
+    return Err("zip_entry_is_dir".to_string());
+  }
+
+  if let Some(parent) = output_path.parent() {
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+  }
+  let mut out_file = OpenOptions::new().create(true).write(true).truncate(true).open(output_path).map_err(|e| e.to_string())?;
+  std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
   Ok(())
 }
 

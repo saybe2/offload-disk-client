@@ -55,11 +55,12 @@ function formatDuration(seconds: number) {
 export default function App() {
   const [serverUrl, setServerUrl] = useState(localStorage.getItem("serverUrl") || DEFAULT_SERVER);
   const [username, setUsername] = useState(localStorage.getItem("username") || "");
-  const [password, setPassword] = useState("");
-  const [masterKey, setMasterKey] = useState(localStorage.getItem("masterKey") || "");
+  const [password, setPassword] = useState(localStorage.getItem("password") || "");
   const [downloadPath, setDownloadPath] = useState(localStorage.getItem("downloadPath") || "");
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [autoLoginTried, setAutoLoginTried] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -121,28 +122,40 @@ export default function App() {
     return archives.filter((a) => (a.folderId || null) === currentFolderId);
   }, [archives, currentFolderId]);
 
-  const connect = async () => {
-    if (!serverUrl || !username || !password || !masterKey) return;
+  const connect = async (silent = false) => {
+    if (!serverUrl || !username || !password) return;
     setConnecting(true);
+    setLoginError("");
     try {
-      await invoke("login", { input: { serverUrl, username, password, masterKey } });
+      const key = await invoke<string>("login", { input: { server_url: serverUrl, username, password } });
       localStorage.setItem("serverUrl", serverUrl);
       localStorage.setItem("username", username);
-      localStorage.setItem("masterKey", masterKey);
+      localStorage.setItem("password", password);
+      localStorage.setItem("masterKey", key);
       if (downloadPath) localStorage.setItem("downloadPath", downloadPath);
       setConnected(true);
       await loadRemote(null);
     } catch (err) {
       console.error(err);
-      alert("Login failed");
+      if (!silent) {
+        setLoginError("Login failed");
+      }
     } finally {
       setConnecting(false);
     }
   };
 
+  useEffect(() => {
+    if (autoLoginTried) return;
+    setAutoLoginTried(true);
+    if (serverUrl && username && password) {
+      connect(true);
+    }
+  }, [autoLoginTried, serverUrl, username, password]);
+
   const loadRemote = async (folderId: string | null) => {
     const foldersResp = await invoke<unknown>("list_folders");
-    const archivesResp = await invoke<unknown>("list_archives", { folderId });
+    const archivesResp = await invoke<unknown>("list_archives", { folder_id: folderId });
     const folderData = (foldersResp as any).folders || [];
     const archiveData = (archivesResp as any).archives || [];
     setFolders(folderData);
@@ -157,7 +170,7 @@ export default function App() {
     }
   };
 
-  const startDownload = async (archiveId: string, name: string) => {
+  const startDownload = async (archiveId: string, name: string, fileIndex?: number) => {
     if (!downloadPath) {
       alert("Set download folder first");
       return;
@@ -165,7 +178,8 @@ export default function App() {
     try {
       const id = await invoke<string>("start_archive_download", {
         archiveId,
-        downloadDir: downloadPath
+        download_dir: downloadPath,
+        file_index: fileIndex
       });
       setDownloads((prev) => ({
         ...prev,
@@ -187,6 +201,72 @@ export default function App() {
   const pauseDownload = async (id: string) => {
     await invoke("pause_download", { id });
   };
+
+  if (!connected) {
+    return (
+      <div className="login-shell">
+        <div className="login-card">
+          <h1>Offload Disk Client</h1>
+          <p>Sign in to your server</p>
+          <label>Server URL</label>
+          <input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} placeholder="http://server:3010" />
+          <label>Username</label>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} />
+          <label>Password</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <label>Download folder</label>
+          <div className="login-row">
+            <input value={downloadPath} onChange={(e) => setDownloadPath(e.target.value)} placeholder="C:\\Downloads" />
+            <button onClick={pickDownloadDir}>Browse</button>
+          </div>
+          {loginError && <div className="login-error">{loginError}</div>}
+          <button className="primary" onClick={() => connect(false)} disabled={connecting}>
+            {connecting ? "Connecting..." : "Login"}
+          </button>
+          <p className="login-hint">Credentials are stored locally to auto-login next time.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const bundleHue = (bundleId: string) => {
+    let hash = 0;
+    for (let i = 0; i < bundleId.length; i += 1) {
+      hash = (hash * 31 + bundleId.charCodeAt(i)) % 360;
+    }
+    return hash;
+  };
+
+  const currentEntries = useMemo(() => {
+    const entries: { key: string; archiveId: string; fileIndex?: number; name: string; status: string; size?: number; bundleId?: string }[] = [];
+    currentArchives.forEach((archive) => {
+      if (archive.isBundle && archive.files && archive.files.length > 1) {
+        archive.files.forEach((file, index) => {
+          const name = file.originalName || `file_${index + 1}`;
+          entries.push({
+            key: `${archive._id}_${index}`,
+            archiveId: archive._id,
+            fileIndex: index,
+            name,
+            status: archive.status,
+            size: file.size,
+            bundleId: archive._id
+          });
+        });
+      } else {
+        const name = archive.displayName || archive.downloadName || archive.name || "file";
+        const size = archive.originalSize || archive.files?.[0]?.size;
+        entries.push({
+          key: archive._id,
+          archiveId: archive._id,
+          name,
+          status: archive.status,
+          size
+        });
+      }
+    });
+    return entries;
+  }, [currentArchives]);
 
   return (
     <div className="app-shell">
@@ -252,15 +332,8 @@ export default function App() {
           </div>
           <div className="server-box">
             <input placeholder="Server URL" value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} />
-            <button onClick={connect} disabled={connecting}>Connect</button>
+            <button onClick={() => connect(false)} disabled={connecting}>Connect</button>
           </div>
-        </div>
-
-        <div className="auth-row">
-          <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-          <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <input placeholder="Master key" value={masterKey} onChange={(e) => setMasterKey(e.target.value)} />
-          <input placeholder="Download folder" value={downloadPath} onChange={(e) => setDownloadPath(e.target.value)} />
         </div>
 
         <div className="breadcrumb">
@@ -289,37 +362,37 @@ export default function App() {
               <span />
             </div>
           ))}
-          {currentArchives.map((file) => {
-            const name = file.displayName || file.downloadName || file.name || "file";
-            const size = file.originalSize || file.files?.[0]?.size;
-            return (
-              <div
-                key={file._id}
-                className="table-row file"
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData("text/plain", file._id);
-                }}
-                onDoubleClick={() => startDownload(file._id, name)}
-              >
-                <span className="row-name"><span className="icon file" />{name}</span>
-                <span>{file.status}</span>
-                <span>{formatSize(size)}</span>
-              </div>
-            );
-          })}
+          {currentEntries.map((file) => (
+            <div
+              key={file.key}
+              className={`table-row file ${file.bundleId ? "bundle" : ""}`}
+              style={file.bundleId ? { ["--bundle-hue" as any]: bundleHue(file.bundleId) } : undefined}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("text/plain", JSON.stringify({ archiveId: file.archiveId, fileIndex: file.fileIndex }));
+              }}
+              onDoubleClick={() => startDownload(file.archiveId, file.name, file.fileIndex)}
+            >
+              <span className="row-name"><span className="icon file" />{file.name}</span>
+              <span>{file.status}</span>
+              <span>{formatSize(file.size)}</span>
+            </div>
+          ))}
         </div>
 
         <div
           className="drop-zone"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
-            const archiveId = e.dataTransfer.getData("text/plain");
-            const file = currentArchives.find((a) => a._id === archiveId);
-            if (file) {
-              const name = file.displayName || file.downloadName || file.name || "file";
-              startDownload(file._id, name);
-            }
+            const payload = e.dataTransfer.getData("text/plain");
+            try {
+              const parsed = JSON.parse(payload);
+              if (parsed?.archiveId) {
+                const name = currentEntries.find((entry) => entry.archiveId === parsed.archiveId && entry.fileIndex === parsed.fileIndex)?.name || "file";
+                startDownload(parsed.archiveId, name, parsed.fileIndex);
+                return;
+              }
+            } catch {}
           }}
         >
           <div>
